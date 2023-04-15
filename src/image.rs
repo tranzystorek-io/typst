@@ -3,6 +3,8 @@
 use std::io;
 use std::sync::Arc;
 
+use ecow::EcoString;
+
 use crate::diag::{format_xml_like_error, StrResult};
 use crate::util::Buffer;
 
@@ -19,15 +21,21 @@ pub struct Image {
     width: u32,
     /// The height in pixels.
     height: u32,
+    /// A text describing the image.
+    alt: Option<EcoString>,
 }
 
 impl Image {
     /// Create an image from a buffer and a format.
     ///
     /// Extracts the width and height.
-    pub fn new(data: Buffer, format: ImageFormat) -> StrResult<Self> {
+    pub fn new(
+        data: Buffer,
+        format: ImageFormat,
+        alt: Option<EcoString>,
+    ) -> StrResult<Self> {
         let (width, height) = determine_size(&data, format)?;
-        Ok(Self { data, format, width, height })
+        Ok(Self { data, format, width, height, alt })
     }
 
     /// The raw image data.
@@ -48,6 +56,11 @@ impl Image {
     /// The height of the image in pixels.
     pub fn height(&self) -> u32 {
         self.height
+    }
+
+    /// A text describing the image.
+    pub fn alt(&self) -> Option<&str> {
+        self.alt.as_deref()
     }
 
     /// Decode the image.
