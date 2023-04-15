@@ -10,6 +10,7 @@ use crate::image::{DecodedImage, RasterFormat};
 pub fn write_images(ctx: &mut PdfContext) {
     for image in ctx.image_map.items() {
         let image_ref = ctx.alloc.bump();
+        let icc_ref = ctx.alloc.bump();
         ctx.image_refs.push(image_ref);
 
         let width = image.width();
@@ -18,7 +19,7 @@ pub fn write_images(ctx: &mut PdfContext) {
         // Add the primary image.
         // TODO: Error if image could not be encoded.
         match image.decode().unwrap().as_ref() {
-            DecodedImage::Raster(dynamic, format) => {
+            DecodedImage::Raster(dynamic, icc, format) => {
                 // TODO: Error if image could not be encoded.
                 let (data, filter, has_color) = encode_image(*format, dynamic).unwrap();
                 let mut image = ctx.writer.image_xobject(image_ref, &data);
@@ -28,10 +29,14 @@ pub fn write_images(ctx: &mut PdfContext) {
                 image.bits_per_component(8);
 
                 let space = image.color_space();
-                if has_color {
-                    space.device_rgb();
+                if icc.is_some() {
+                    space.icc_based(icc_ref);
                 } else {
-                    space.device_gray();
+                    if has_color {
+                        space.device_rgb();
+                    } else {
+                        space.device_gray();
+                    }
                 }
 
                 // Add a second gray-scale image containing the alpha values if
@@ -48,6 +53,23 @@ pub fn write_images(ctx: &mut PdfContext) {
                     mask.height(height as i32);
                     mask.color_space().device_gray();
                     mask.bits_per_component(8);
+                } else {
+                    image.finish();
+                }
+
+                if let Some(icc) = icc {
+                    let compressed = deflate(icc);
+                    let mut icc_stream = ctx.writer.icc_profile(icc_ref, &compressed);
+                    icc_stream.filter(Filter::FlateDecode);
+                    if has_color {
+                        icc_stream.n(3);
+                        icc_stream.alternate().srgb();
+                    } else {
+                        icc_stream.n(1);
+                        icc_stream.alternate().d65_gray();
+                    }
+
+                    icc_stream.finish();
                 }
             }
             DecodedImage::Svg(svg) => {

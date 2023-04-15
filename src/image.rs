@@ -3,6 +3,12 @@
 use std::io;
 use std::sync::Arc;
 
+use image::codecs::gif::GifDecoder;
+use image::codecs::jpeg::JpegDecoder;
+use image::codecs::png::PngDecoder;
+use image::io::Limits;
+use image::ImageDecoder;
+
 use crate::diag::{format_xml_like_error, StrResult};
 use crate::util::Buffer;
 
@@ -62,9 +68,35 @@ impl Image {
             }
             ImageFormat::Raster(format) => {
                 let cursor = io::Cursor::new(&self.data);
-                let reader = image::io::Reader::with_format(cursor, format.into());
-                let dynamic = reader.decode().map_err(format_image_error)?;
-                DecodedImage::Raster(dynamic, format)
+                let limits = Limits::default();
+
+                let mut icc = None;
+
+                let dynamic = match format {
+                    RasterFormat::Jpg => {
+                        let mut decoder =
+                            JpegDecoder::new(cursor).map_err(format_image_error)?;
+                        icc = decoder.icc_profile();
+                        decoder.set_limits(limits).map_err(format_image_error)?;
+                        image::DynamicImage::from_decoder(decoder)
+                    }
+                    RasterFormat::Png => {
+                        let mut decoder =
+                            PngDecoder::new(cursor).map_err(format_image_error)?;
+                        icc = decoder.icc_profile();
+                        decoder.set_limits(limits).map_err(format_image_error)?;
+                        image::DynamicImage::from_decoder(decoder)
+                    }
+                    RasterFormat::Gif => {
+                        let mut decoder =
+                            GifDecoder::new(cursor).map_err(format_image_error)?;
+                        decoder.set_limits(limits).map_err(format_image_error)?;
+                        image::DynamicImage::from_decoder(decoder)
+                    }
+                }
+                .map_err(format_image_error)?;
+
+                DecodedImage::Raster(dynamic, icc, format)
             }
         }))
     }
@@ -123,8 +155,8 @@ impl From<ttf_parser::RasterImageFormat> for ImageFormat {
 
 /// A decoded image.
 pub enum DecodedImage {
-    /// A decoded pixel raster.
-    Raster(image::DynamicImage, RasterFormat),
+    /// A decoded pixel raster with its ICC profile.
+    Raster(image::DynamicImage, Option<Vec<u8>>, RasterFormat),
     /// An decoded SVG tree.
     Svg(usvg::Tree),
 }
